@@ -1,3 +1,8 @@
+import warnings
+from cryptography.utils import CryptographyDeprecationWarning
+
+# Suppress CryptographyDeprecationWarning warnings
+warnings.filterwarnings("ignore", category=CryptographyDeprecationWarning)
 import os
 import time
 from email.mime.text import MIMEText
@@ -11,6 +16,8 @@ import paramiko
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.application import MIMEApplication
+
+import logging
 
 # Load environment variables
 load_dotenv(override=True)
@@ -28,13 +35,12 @@ CHECK_EVERY_X_MIN = int(os.getenv('CHECK_EVERY_X_MIN'))*60
 EMAIL_SUBJECT = os.getenv('EMAIL_SUBJECT')
 
 #DEBUG
-DEBUG = True 
+DEBUG = False 
 DAYS_BEHIND_TO_CHECK = 7
+SCRIPT_RUNS_EVERY_SECS = 1 
 
 if DEBUG: 
-    import logging
     logging.basicConfig(level=logging.INFO, filename='monitor_file.log', filemode='a',format='%(asctime)s - %(levelname)s - %(message)s')
-
 
 def connect_sftp():
     transport = paramiko.Transport((SFTP_HOST, SFTP_PORT))
@@ -199,7 +205,7 @@ def monitor_folder():
     while count < 10: 
         current_time = datetime.now()
         #if current_time.weekday() < 5 and current_time.hour >= 15 and current_time.minute >= 45:
-        if True:
+        if True: # Modify this to change the script to notify only on weekdays after market closes 
             sftp, transport = connect_sftp()
             try:
                 new_files = check_for_new_files(sftp, last_checked)
@@ -220,8 +226,8 @@ def monitor_folder():
                 sftp.close()
                 transport.close()
                 
-        time.sleep(CHECK_EVERY_X_MIN)
-        print(count)
+        time.sleep(CHECK_EVERY_X_MIN/60)
+        #print(count)
         count += 1
 
 if __name__ == "__main__":
