@@ -10,7 +10,9 @@ import re
 import paramiko
 import smtplib
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
+
 
 # Load environment variables
 load_dotenv(override=True)
@@ -24,23 +26,17 @@ EMAIL_SERVER = os.getenv('EMAIL_SERVER')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT'))
 EMAIL_SENDER = os.getenv('EMAIL_SENDER')
 EMAIL_RECEIVER = os.getenv('EMAIL_RECEIVER')
-CHECK_EVERY_X_MIN = int(os.getenv('CHECK_EVERY_X_MIN'))*60
+TIME_TO_CHECK = int(os.getenv('TIME_TO_CHECK'))
 EMAIL_SUBJECT = os.getenv('EMAIL_SUBJECT')
 
 #DEBUG
 DEBUG = True 
 DAYS_BEHIND_TO_CHECK = 7
 
-if DEBUG: 
-    import logging
-    logging.basicConfig(level=logging.INFO, filename='monitor_file.log', filemode='a',format='%(asctime)s - %(levelname)s - %(message)s')
-
-
 def connect_sftp():
     transport = paramiko.Transport((SFTP_HOST, SFTP_PORT))
     transport.connect(username=SFTP_USERNAME, password=SFTP_PASSWORD)
     sftp = paramiko.SFTPClient.from_transport(transport)
-    logging.info("Connected to SFTP server.")
     return sftp, transport
 
 def check_for_new_files(sftp, last_checked):
@@ -61,8 +57,8 @@ def check_for_new_files(sftp, last_checked):
 
 
     files = sftp.listdir()
-    new_files = [(file, sftp.open(file).read()) for file in files if pattern.match(file) and sftp.stat(file).st_mtime > last_checked]
-    if DEBUG:logging.info(f"Checked for new files, found {len(new_files)} matching files.")
+    new_files = [file for file in files if pattern.match(file) and sftp.stat(file).st_mtime > last_checked]
+    
     return new_files
 
 def parse_file_for_error(sftp, filename):
@@ -93,13 +89,9 @@ def parse_file_for_error(sftp, filename):
                             account_errors[account_number]["Error Descriptions"].append(error_description)
     
     except json.JSONDecodeError:
-        if DEBUG: logging.error(f"Failed to parse JSON for file {filename}.")
         return True, f"Error: Failed to parse JSON in file {filename}"
     
     if account_errors:
-        if DEBUG: 
-            logging.info(f"Found errors in file {filename}.")
-            logging.info(account_errors)
         return True, account_errors
     else:
         return False, None
@@ -157,7 +149,82 @@ def write_email_body(account_errors):
     </html>
     """
 
+    
     return html_table
+
+def save_errors_to_spreadsheet(account_errors, output_file):
+    rows = []
+    for account, errors in account_errors.items():
+        row = {
+            "Account Number": account,
+            "Error Codes": ", ".join(errors["Error Codes"]),
+            "Error Descriptions": ", ".join(errors["Error Descriptions"]),
+            "External IDs": ", ".join(errors["External IDs"]),
+        }
+        rows.append(row)
+    
+    df = pd.DataFrame(rows)
+    
+    folder_name = create_folder_with_current_date()
+    full_output_path = os.path.join(folder_name, output_file)
+    df.to_excel(full_output_path+".xlsx", index=False)
+    df.to_csv(full_output_path+".csv", index=False)
+    df.to_html(full_output_path+".html", index=False)
+    with open(full_output_path+".json", 'w', encoding='utf-8') as f:
+        df.to_json(f, force_ascii=False, indent=4)
+    print(f"Errors saved to {full_output_path}(xlsx|csv|html|json)")
+    # Generate HTML table
+    html_table = df.to_html(index=False, escape=False)
+
+    # Style the table with inline CSS
+    html_table = f"""
+    <html>
+    <head>
+    <style>
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+        }}
+        th, td {{
+            border: 1px solid #dddddd;
+            text-align: left;
+            padding: 8px;
+        }}
+        tr:nth-child(even) {{
+            background-color: #f2f2f2;
+        }}
+        .external-ids {{
+            max-height: 20px;
+            overflow: hidden;
+            transition: max-height 0.5s ease-in-out;
+        }}
+        input[type="checkbox"]:checked + div {{
+            max-height: 300px;
+            overflow: auto;
+        }}
+        label {{
+            display: block;
+            margin-top: 5px;
+        }}
+    </style>
+    </head>
+    <body>
+    <h2>{EMAIL_SUBJECT}</h2>
+    {html_table}
+    </body>
+    </html>
+    """
+
+    
+    return html_table
+
+def create_folder_with_current_date():
+    year = datetime.now().strftime('%Y')
+    month_day = datetime.now().strftime('%m-%d')
+    folder_path = os.path.join(year, month_day)
+    os.makedirs(folder_path, exist_ok=True)
+    return folder_path
+
 
 def send_email(subject, body, attachments=None):
     # Create a MIME object
@@ -171,56 +238,59 @@ def send_email(subject, body, attachments=None):
 
     # Attach files if there are any
     if attachments:
-        for filename, filecontent in attachments:
-            part = MIMEApplication(filecontent, Name=os.path.basename(filename))
-            part['Content-Disposition'] = f'attachment; filename="{os.path.basename(filename)}"'
-            msg.attach(part)
-            if DEBUG: logging.info(f"Attached file {filename} to email.")
+        for attachment in attachments:
+            try:
+                with open(attachment, 'rb') as f:
+                    part = MIMEApplication(f.read(), Name=os.path.basename(attachment))
+                    part['Content-Disposition'] = f'attachment; filename="{os.path.basename(attachment)}"'
+                    msg.attach(part)
+            except Exception as e:
+                print(f"Error attaching file {attachment}: {e}")
 
     # Create SMTP session
     try:
         with smtplib.SMTP(EMAIL_SERVER, EMAIL_PORT) as server:
+            #server.starttls()  # Secure the connection
+            #server.login(EMAIL_USERNAME, EMAIL_PASSWORD)  # Login with your Outlook account
             server.sendmail(EMAIL_SENDER, EMAIL_RECEIVER, msg.as_string())
-            print(f"Email sent successfully from {EMAIL_SENDER} to {EMAIL_RECEIVER}")
-            if DEBUG: logging.info(f"Email sent successfully from {EMAIL_SENDER} to {EMAIL_RECEIVER}")
+            print("Email sent successfully.")
     except Exception as e:
-        if DEBUG:logging.error(f"Error sending email: {e}")
         print(f"Error sending email: {e}")
 
 def monitor_folder():
     last_checked = time.time() 
+
     ############### DEBUG  ########################
     if DEBUG:
         seconds_in_24_hours = 24*60*60*DAYS_BEHIND_TO_CHECK
         last_checked = time.time() - seconds_in_24_hours
-    ############### DEBUG  ########################
-
+    ##################################################
+    
     count = 0
-    while count < 10: 
+    while count < 10: # while True:
         current_time = datetime.now()
-        #if current_time.weekday() < 5 and current_time.hour >= 15 and current_time.minute >= 45:
-        if True:
+        if True:#current_time.weekday() < 5: # and current_time.hour >= 15 and current_time.minute >= 45:
             sftp, transport = connect_sftp()
             try:
                 new_files = check_for_new_files(sftp, last_checked)
                 error_files = []
                 passed_files = []
                 if new_files:
-                    for new_file, filecontent in new_files:
+                    for new_file in new_files:
                         isError, error_records  = parse_file_for_error(sftp, new_file)
                         if isError:
+                            output_file = f"errors_{new_file.replace('.csv.', '_')}"
+                            #email_body = save_errors_to_spreadsheet(error_records, output_file)
                             email_body = write_email_body(error_records)
-                            send_email(subject=EMAIL_SUBJECT, body=email_body, attachments=[(new_file, filecontent)])
+                            send_email(subject = EMAIL_SUBJECT, body = email_body, attachments=None)
                             error_files.append([new_file, error_records])
                         else:
                             passed_files.append(new_file)
-
                 last_checked = time.time()
             finally:
                 sftp.close()
-                transport.close()
-                
-        time.sleep(CHECK_EVERY_X_MIN)
+                transport.close()    
+        time.sleep(1)
         print(count)
         count += 1
 
