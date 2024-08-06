@@ -18,8 +18,8 @@ This script monitors a specified directory for any new or modified files in the 
 ## Installation
 1. Clone the repository:
     ```bash
-    git clone https://github.com/yourusername/file-monitor-docker.git
-    cd file-monitor-docker
+    git clone https://github.com/chandhanu/Automated-Remote-Server-FileSystem-monitor-email-notification.git
+    cd Automated-Remote-Server-FileSystem-monitor
     ```
 
 2. Install the required Python libraries:
