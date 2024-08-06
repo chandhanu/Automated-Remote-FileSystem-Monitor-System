@@ -29,7 +29,7 @@ This script monitors a specified directory for any new or modified files in the 
 
 ## Configuration
 1. Set up your environment variables:
-    Create a `.env` file in the root directory of your project and add your email and SFTP server configurations:
+    Create a `.env` file in the root directory of your project and add your email and SFTP server configurations (NOTE: `load_dotenv`is in override mode):
     
     ```
     EMAIL_SERVER=smtp.office365.com
