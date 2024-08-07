@@ -1,11 +1,4 @@
-# syntax=docker/dockerfile:1
-
-# Comments are provided throughout this file to help you get started.
-# If you need more help, visit the Dockerfile reference guide at
-# https://docs.docker.com/go/dockerfile-reference/
-
-# Want to help us make this template better? Share your feedback here: https://forms.gle/ybq9Krt8jtBL3iCk7
-
+# Use an ARG to set the base image Python version
 ARG PYTHON_VERSION=3.9.6
 FROM python:${PYTHON_VERSION}-slim as base
 
@@ -15,6 +8,9 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Keeps Python from buffering stdout and stderr to avoid situations where
 # the application crashes without emitting any logs due to buffering.
 ENV PYTHONUNBUFFERED=1
+
+# Install cron
+RUN apt-get update && apt-get install -y cron
 
 WORKDIR /app
 COPY requirements.txt /app/
@@ -45,8 +41,14 @@ USER appuser
 # Copy the source code into the container.
 COPY . .
 
-# Expose the port that the application listens on.
-EXPOSE 5243
+# Add the cron job
+RUN echo "0 15 * * 1-5 /usr/bin/python3 /app/monitor_file.py" > /etc/cron.d/monitor_job
 
-# Run the application.
-CMD python3 monitor_file.py
+# Give execution rights on the cron job
+RUN chmod 0644 /etc/cron.d/monitor_job
+
+# Apply cron job
+RUN crontab /etc/cron.d/monitor_job
+
+# Start the cron service and the application
+CMD ["cron", "-f"]
