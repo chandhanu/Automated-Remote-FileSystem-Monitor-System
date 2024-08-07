@@ -33,10 +33,12 @@ EMAIL_SENDER = os.getenv('EMAIL_SENDER')
 EMAIL_RECEIVER = os.getenv('EMAIL_RECEIVER')
 CHECK_EVERY_X_MIN = int(os.getenv('CHECK_EVERY_X_MIN'))*60
 EMAIL_SUBJECT = os.getenv('EMAIL_SUBJECT')
+STOP_SCRIPT_AT = int(os.getenv('STOP_SCRIPT_AT'))
+START_SCRIPT_AT = int(os.getenv('START_SCRIPT_AT'))
 
 #DEBUG
-DEBUG = False 
-DAYS_BEHIND_TO_CHECK = 7
+DEBUG = True 
+DAYS_BEHIND_TO_CHECK = 9
 SCRIPT_RUNS_EVERY_SECS = 1 
 
 if DEBUG: 
@@ -194,18 +196,24 @@ def send_email(subject, body, attachments=None):
         print(f"Error sending email: {e}")
 
 def monitor_folder():
+    #print("Script running ")
     last_checked = time.time() 
     ############### DEBUG  ########################
     if DEBUG:
         seconds_in_24_hours = 24*60*60*DAYS_BEHIND_TO_CHECK
         last_checked = time.time() - seconds_in_24_hours
     ############### DEBUG  ########################
-
     count = 0
-    while count < 10: 
+    #while count < 10: 
+    while True:
         current_time = datetime.now()
-        #if current_time.weekday() < 5 and current_time.hour >= 15 and current_time.minute >= 45:
-        if True: # Modify this to change the script to notify only on weekdays after market closes 
+        # Stop running the script at midnight (STOP_SCRIPT_AT)
+        if current_time.hour == STOP_SCRIPT_AT :#and current_time.minute == STOP_SCRIPT_AT_MIDNIGHT:
+            #print("Stopping script at midnight.")
+            break
+        # Starts at (START_SCRIPT_AT) 3 pm CST
+        if current_time.weekday() < 5 and current_time.hour >= START_SCRIPT_AT :#and current_time.minute >= 45:
+        #if True: # Modify this to change the script to notify only on weekdays after market closes 
             sftp, transport = connect_sftp()
             try:
                 new_files = check_for_new_files(sftp, last_checked)
@@ -226,7 +234,7 @@ def monitor_folder():
                 sftp.close()
                 transport.close()
                 
-        time.sleep(CHECK_EVERY_X_MIN/60)
+        time.sleep(CHECK_EVERY_X_MIN)
         #print(count)
         count += 1
 
