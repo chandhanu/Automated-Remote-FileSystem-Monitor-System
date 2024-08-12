@@ -1,22 +1,24 @@
-# Use an ARG to set the base image Python version
+# syntax=docker/dockerfile:1
+
 ARG PYTHON_VERSION=3.9.6
 FROM python:${PYTHON_VERSION}-slim as base
 
-# Prevents Python from writing pyc files.
-ENV PYTHONDONTWRITEBYTECODE=1
-
-# Keeps Python from buffering stdout and stderr to avoid situations where
-# the application crashes without emitting any logs due to buffering.
-ENV PYTHONUNBUFFERED=1
+# Switch to root to install and configure cron
+USER root
 
 # Install cron
 RUN apt-get update && apt-get install -y cron
 
+# Prevent Python from writing pyc files
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# Keeps Python from buffering stdout and stderr
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 COPY requirements.txt /app/
 
-# Create a non-privileged user that the app will run under.
-# See https://docs.docker.com/go/dockerfile-user-best-practices/
+# Create a non-privileged user
 ARG UID=10001
 RUN adduser \
     --disabled-password \
@@ -27,28 +29,28 @@ RUN adduser \
     --uid "${UID}" \
     appuser
 
-# Download dependencies as a separate step to take advantage of Docker's caching.
-# Leverage a cache mount to /root/.cache/pip to speed up subsequent builds.
-# Leverage a bind mount to requirements.txt to avoid having to copy them into
-# into this layer.
+# Download dependencies
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=bind,source=requirements.txt,target=requirements.txt \
     python -m pip install -r requirements.txt
 
-# Switch to the non-privileged user to run the application.
-USER appuser
-
-# Copy the source code into the container.
+# Copy the source code
 COPY . .
 
-# Add the cron job
-RUN echo "0 15 * * 1-5 /usr/bin/python3 /app/monitor_file.py" > /etc/cron.d/monitor_job
+# Create and set up cron job
+RUN echo "0 15 * * 1-5 /usr/bin/python3 /app/monitor_file.py >> /var/log/cron.log 2>&1" > /etc/cron.d/monitor_job \
+    && chmod 0644 /etc/cron.d/monitor_job \
+    && crontab /etc/cron.d/monitor_job
 
-# Give execution rights on the cron job
-RUN chmod 0644 /etc/cron.d/monitor_job
+# Ensure cron directories have the correct permissions
+RUN mkdir -p /var/run && chmod 0755 /var/run \
+    && mkdir -p /var/run/crond && chmod 0755 /var/run/crond
 
-# Apply cron job
-RUN crontab /etc/cron.d/monitor_job
+# Switch back to the non-privileged user
+USER appuser
 
-# Start the cron service and the application
-CMD ["cron", "-f"]
+# Start cron and your application
+CMD service cron start && python3 /app/monitor_file.py
+
+# Expose port
+EXPOSE 5243
